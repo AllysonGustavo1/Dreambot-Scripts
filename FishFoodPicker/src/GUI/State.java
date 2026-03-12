@@ -1,0 +1,5 @@
+package GUI;
+
+public enum State {
+    WALKINGTOBANK, WALKINGTOPICKAREA, PICKING, BANKING, DEFAULT
+}
