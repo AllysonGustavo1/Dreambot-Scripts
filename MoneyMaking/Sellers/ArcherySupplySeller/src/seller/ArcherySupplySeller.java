@@ -297,7 +297,7 @@ public class ArcherySupplySeller extends AbstractScript {
             Optional<Item> shopItem = Shop.all().stream()
                 .filter(item -> item != null && itemName.equals(item.getName()))
                 .findFirst();
-            return shopItem.isPresent() ? shopItem.get().getAmount() : 0;
+            return shopItem.map(Item::getAmount).orElse(0);
         }
         return 0;
     }
@@ -306,7 +306,7 @@ public class ArcherySupplySeller extends AbstractScript {
         Optional<Item> item = InventoryUtils.findItemByName(Inventory.all(), itemName);
         if (item.isPresent()) {
             Logger.log("Selling conditions met for " + itemName);
-            if (item.get().interact("Sell 10")) {
+            if (Shop.sell(item.get(), 10)) {
                 Logger.log("Sold 10x " + itemName + " to Brian");
                 suppliesSold += 10;
                 
