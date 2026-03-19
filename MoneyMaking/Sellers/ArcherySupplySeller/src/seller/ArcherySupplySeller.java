@@ -39,6 +39,7 @@ public class ArcherySupplySeller extends AbstractScript {
     private static final int MAX_SLEEP_WALKING = 3000;
     private static final int MIN_SLEEP_WORLD_HOP = 3000;
     private static final int MAX_SLEEP_WORLD_HOP = 5000;
+    private static final int MAX_HOP_ATTEMPTS = 3;
 
     private final Area brianArea = new Area(2953, 3205, 2960, 3202);
     
@@ -47,6 +48,7 @@ public class ArcherySupplySeller extends AbstractScript {
     private int suppliesSold = 0;
     private int totalProfit = 0;
     private int currentWorldIndex = 0;
+    private int lastProcessedWorld = -1;
 
     private final String[] REQUIRED_ITEMS = {
         "Mithril arrow",
@@ -61,7 +63,7 @@ public class ArcherySupplySeller extends AbstractScript {
     private final int[] F2P_WORLDS = {
         308, 316, 326, 335, 379, 380, 382, 383, 384, 397, 398, 399, 
         417, 418, 430, 431, 433, 434, 435, 436, 437, 451, 452, 
-        453, 454, 455, 456, 469, 475, 476, 483, 497, 498, 499, 500, 501, 537, 544, 545, 546, 547, 552, 553, 554, 555, 571, 575
+        453, 454, 455, 456, 469, 475, 476, 483, 497, 498, 499, 500, 501, 537, 552, 553, 554, 555, 571
     };
 
     // Valores fixos que o Brian paga por 10 unidades de cada item
@@ -171,13 +173,37 @@ public class ArcherySupplySeller extends AbstractScript {
     private void hopToRandomWorld() {
         isHoppingWorld = true;
         Logger.log("Hopping to next F2P world...");
-        
-        currentWorldIndex = (currentWorldIndex + 1) % F2P_WORLDS.length;
-        int targetWorld = F2P_WORLDS[currentWorldIndex];
-        
-        Logger.log("Hopping to world " + targetWorld);
-        WorldHopperHelper.hopToWorld(targetWorld);
-        Sleep.sleep(MIN_SLEEP_WORLD_HOP, MAX_SLEEP_WORLD_HOP);
+
+        // Keep index aligned with the real world in case a previous hop failed or the world changed externally.
+        int currentWorld = WorldHopperHelper.getCurrentWorld();
+        int detectedIndex = findWorldIndex(currentWorld);
+        if (detectedIndex != currentWorldIndex) {
+            Logger.log("Syncing world index from " + currentWorldIndex + " to " + detectedIndex + " (current world: " + currentWorld + ")");
+            currentWorldIndex = detectedIndex;
+        }
+
+        int attempts = Math.min(MAX_HOP_ATTEMPTS, F2P_WORLDS.length);
+        boolean hopSuccess = false;
+
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            int targetIndex = (currentWorldIndex + attempt) % F2P_WORLDS.length;
+            int targetWorld = F2P_WORLDS[targetIndex];
+
+            Logger.log("Hop attempt " + attempt + "/" + attempts + " -> world " + targetWorld);
+            hopSuccess = WorldHopperHelper.hopToWorld(targetWorld);
+
+            if (hopSuccess) {
+                currentWorldIndex = targetIndex;
+                break;
+            }
+
+            Sleep.sleep(MIN_SLEEP_MEDIUM, MAX_SLEEP_MEDIUM);
+        }
+
+        if (!hopSuccess) {
+            Logger.log("Could not hop after " + attempts + " attempts. Will retry on next loop.");
+            Sleep.sleep(MIN_SLEEP_WORLD_HOP, MAX_SLEEP_WORLD_HOP);
+        }
 
         isHoppingWorld = false;
     }
@@ -217,6 +243,13 @@ public class ArcherySupplySeller extends AbstractScript {
     }
 
     private void sellToBrian() {
+        int currentWorld = WorldHopperHelper.getCurrentWorld();
+        if (currentWorld == lastProcessedWorld) {
+            Logger.log("World " + currentWorld + " already processed, forcing hop before trading again.");
+            hopToRandomWorld();
+            return;
+        }
+
         NPC brian = NPCs.closest("Brian");
         if (brian != null && brian.interact("Trade")) {
             Logger.log("Clicked trade with Brian, waiting for shop to open...");
@@ -274,8 +307,14 @@ public class ArcherySupplySeller extends AbstractScript {
                 // Fechar loja e pular mundo
                 Logger.log("Finished checking all items, closing shop...");
                 Sleep.sleep(MIN_SLEEP_MEDIUM, MAX_SLEEP_MEDIUM); // Delay antes de fechar
-                Shop.close();
-                Sleep.sleep(MIN_SLEEP_LONG, MAX_SLEEP_LONG); // Delay maior após fechar
+                if (Shop.isOpen()) {
+                    Shop.close();
+                    Sleep.sleepUntil(() -> !Shop.isOpen(), 2500);
+                }
+                Sleep.sleep(MIN_SLEEP_LONG, MAX_SLEEP_LONG); // Delay maior apos fechar
+
+                // Mark this world as already processed to avoid reopening the same shop if a hop fails.
+                lastProcessedWorld = currentWorld;
                 hopToRandomWorld();
             } else {
                 Logger.log("Shop didn't open within 10 seconds, hopping worlds...");

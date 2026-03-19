@@ -21,7 +21,7 @@ import helpers.WorldHopperHelper;
 import utils.PriceUtil;
 import utils.WalkingUtil;
 
-@ScriptManifest(author = "Allyson Gustavo", description = "Pick fish food for you xD", name = "FishFoodPicker", category = Category.MONEYMAKING, version = 1)
+@ScriptManifest(author = "Allyson Gustavo", description = "Pick fish food for you xD", name = "FishFoodPicker", category = Category.MONEYMAKING, version = 1, image = "https://i.imgur.com/6KlhpT2.png")
 public class FishFoodPicker extends AbstractScript {
 
     private Area FishFoodArea = new Area(3107, 3357, 3109, 3355, 1);
@@ -32,6 +32,8 @@ public class FishFoodPicker extends AbstractScript {
     private int fishFoodPickedGlobal = 0;
     private float estimatedProfit = 0;
     private GroundItem item = null;
+    private int bankingFailureCount = 0;
+    private static final int MAX_BANKING_FAILURES = 5;
 
     @Override
     public int onLoop() {
@@ -69,7 +71,21 @@ public class FishFoodPicker extends AbstractScript {
             case BANKING:
                 Logger.log("State: Banking");
                 ui.setState(State.BANKING);
-                BankingHelper.depositAllItems(BankArea);
+                BankingHelper.debugNearbyObjects(); // Debug para identificar o nome correto do banco
+                Logger.log("Attempting to deposit items... (Failure count: " + bankingFailureCount + "/" + MAX_BANKING_FAILURES + ")");
+                if (BankingHelper.depositAllItems(BankArea)) {
+                    Logger.log("✓ Successfully deposited all items");
+                    bankingFailureCount = 0; // Reset contador
+                    Sleep.sleep(2000, 3000); // Wait longer for inventory to fully update
+                } else {
+                    bankingFailureCount++;
+                    Logger.log("✗ Failed to deposit items (Failure #" + bankingFailureCount + ")");
+                    if (bankingFailureCount >= MAX_BANKING_FAILURES) {
+                        Logger.log("⚠ Banking failed too many times, returning to pick area...");
+                        bankingFailureCount = 0;
+                    }
+                    Sleep.sleep(1000, 1500);
+                }
                 break;
             case DEFAULT:
                 Logger.log("State: UNKNOWN STATE");
@@ -83,8 +99,16 @@ public class FishFoodPicker extends AbstractScript {
         // Se inventário cheio, vai para banco
         if (Inventory.isFull() && BankArea != null && !BankArea.contains(Players.getLocal())) {
             return State.WALKINGTOBANK;
-        } else if (Inventory.isFull() && BankArea != null && BankArea.contains(Players.getLocal())) {
+        } else if (Inventory.isFull() && BankArea != null && BankArea.contains(Players.getLocal()) && bankingFailureCount < MAX_BANKING_FAILURES) {
             return State.BANKING;
+        }
+
+        // Se muitas falhas de banking, volta para a área de coleta para resetar
+        if (bankingFailureCount >= MAX_BANKING_FAILURES) {
+            if (!FishFoodArea.contains(Players.getLocal())) {
+                return State.WALKINGTOPICKAREA;
+            }
+            return State.PICKING;
         }
 
         // Se inventário não está cheio
